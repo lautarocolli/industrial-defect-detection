@@ -108,6 +108,37 @@ rm neu-urface-defect-database.zip
 
 ---
 
+## 6️⃣ Split the Dataset (Train / Val / Test)
+
+Before running the training notebook, you must split the dataset into:
+
+- **70% Training**
+- **15% Validation**
+- **15% Test**
+
+This project includes a script that automatically splits both **images and annotations**.
+
+> **What are annotations?**  
+> Annotations are XML label files associated with each image.  
+> They contain the ground-truth defect class and bounding box coordinates (xmin, ymin, xmax, ymax) that define where the defect appears in the image.  
+> This information is used as the training target for the model.
+
+The script is located at:
+
+```
+src/split_dataset.py
+```
+
+### ▶️ Run the split script
+
+From the project root directory:
+
+```bash
+python src/split_dataset.py
+```
+
+---
+
 ## 📁 Project Structure
 
 ```
