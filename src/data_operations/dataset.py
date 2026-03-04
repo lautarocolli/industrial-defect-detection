@@ -1,33 +1,47 @@
 """
+dataset.py
+─────────────────────────────────────────────────────────────────────────────
 PyTorch Dataset for the NEU Surface Defect Database.
+
+Task: Classification — predict defect class from image.
 
 Directory structure expected:
     data/splits/{split}/IMAGES/      ← .jpg images
     data/splits/{split}/ANNOTATIONS/ ← .xml Pascal VOC annotations
 
 Label source:
-    Class label and bounding boxes are both read from the XML annotation file.
-    The <object><name> tag is the ground truth class — filename is never parsed.
+    Class label is read from the <object><name> tag in the XML file.
+    Filename is never parsed.
 
-Each sample always returns:
+Each training batch contains:
     image       FloatTensor  [3, 224, 224]
     label       int          class index
-    boxes       FloatTensor  [N, 4]  (xmin, ymin, xmax, ymax)
-    image_path  str          original path — used for Grad-CAM / debugging
+    image_path  str          original path — used to look up boxes for Grad-CAM
+
+Boxes are loaded separately at visualisation time:
+    dataset.get_boxes(image_path) → FloatTensor [N, 4] (xmin, ymin, xmax, ymax)
 
 Usage:
-    from src.data.dataset import NEUDefectDataset, build_dataloaders
-    from src.data.transforms import get_train_transforms, get_val_transforms
+    from src.data_operations.dataset import NEUDefectDataset, build_dataloaders
+    from src.data_operations.transforms import get_train_transforms, get_val_transforms
 
-    train_ds = NEUDefectDataset(
-        root      = Path("data/splits"),
-        split     = "train",
-        transform = get_train_transforms(),
+    train_loader, val_loader, test_loader = build_dataloaders(
+        root            = Path("data/splits"),
+        train_transform = get_train_transforms(),
+        val_transform   = get_val_transforms(),
+        batch_size      = 32,
     )
 
-    print(train_ds.classes)         # ["crazing", "inclusion", ...]
-    print(train_ds.class_to_idx)    # {"crazing": 0, "inclusion": 1, ...}
-    print(train_ds[0])              # {"image": ..., "label": 0, "boxes": ..., "image_path": ...}
+    # Training batch
+    batch = next(iter(train_loader))
+    batch["image"].shape      # [32, 3, 224, 224]
+    batch["label"].shape      # [32]
+    batch["image_path"][0]    # "data/splits/train/IMAGES/crazing_1.jpg"
+
+    # Grad-CAM visualisation — load boxes for a specific image
+    boxes = train_loader.dataset.get_boxes("data/splits/train/IMAGES/crazing_1.jpg")
+    # FloatTensor [[xmin, ymin, xmax, ymax], ...]
+─────────────────────────────────────────────────────────────────────────────
 """
 
 import xml.etree.ElementTree as ET
@@ -41,41 +55,6 @@ from torch.utils.data import DataLoader, Dataset
 # ── Types ──────────────────────────────────────────────────────────────────
 SplitName = Literal["train", "val", "test"]
 
-# ══════════════════════════════════════════════════════════════════════════
-# Collate
-# ══════════════════════════════════════════════════════════════════════════
-
-def collate_fn(batch: list[dict]) -> dict:
-    """
-    Custom collate function for NEU-DET detection batches.
-
-    Why this is needed:
-        PyTorch's default collate stacks all sample values into tensors.
-        This works for images [3, 224, 224] and labels (int), but fails
-        for bounding boxes because different images contain different numbers
-        of defect instances — shapes [1, 4], [3, 4], [2, 4] cannot be stacked.
-
-    Solution:
-        Stack images and labels normally.
-        Keep boxes as a list of tensors — one per image, no stacking.
-
-    Args:
-        batch: list of sample dicts from NEUDefectDataset.__getitem__
-
-    Returns:
-        {
-            "image":      FloatTensor [batch_size, 3, 224, 224],
-            "label":      LongTensor  [batch_size],
-            "boxes":      list of FloatTensor, each [N_i, 4],
-            "image_path": list of str,
-        }
-    """
-    return {
-        "image":      torch.stack([s["image"] for s in batch]),
-        "label":      torch.tensor([s["label"] for s in batch], dtype=torch.long),
-        "boxes":      [s["boxes"] for s in batch],
-        "image_path": [s["image_path"] for s in batch],
-    }
 
 # ══════════════════════════════════════════════════════════════════════════
 # Dataset
@@ -83,7 +62,10 @@ def collate_fn(batch: list[dict]) -> dict:
 
 class NEUDefectDataset(Dataset):
     """
-    PyTorch Dataset for NEU-DET surface defect detection.
+    PyTorch Dataset for NEU-DET surface defect classification.
+
+    Predicts defect class from image. Bounding boxes are available on demand
+    via get_boxes() for Grad-CAM overlay.
 
     Args:
         root:      Path to the splits root directory (e.g. Path("data/splits"))
@@ -169,18 +151,21 @@ class NEUDefectDataset(Dataset):
 
     # ── XML parsing ────────────────────────────────────────────────────────
 
-    def _parse_annotation(self, image_path: Path) -> tuple[list[str], list[list[int]]]:
+    def _parse_annotation(self, image_path: Path) -> tuple[str, list[list[int]]]:
         """
-        Parse a Pascal VOC XML file in a single pass.
+        Parse a Pascal VOC XML file and return class name + bounding boxes.
 
-        Extracts both class names and bounding boxes together to avoid
-        parsing the same file twice.
+        Both are extracted in a single pass to avoid reading the file twice.
 
         Returns:
-            class_names: list of class name strings, one per object instance
-            boxes:       list of [xmin, ymin, xmax, ymax] per object instance
+            class_name: defect class of this image (first object's name)
+            boxes:      list of [xmin, ymin, xmax, ymax] per defect instance
 
-        Both lists are parallel — class_names[i] corresponds to boxes[i].
+        Note:
+            NEU-DET images contain one defect class per image — all objects
+            share the same class. class_name is taken from the first object.
+            If your dataset ever contains mixed-class images this will need
+            revisiting.
 
         Raises:
             FileNotFoundError: if the .xml file does not exist
@@ -196,8 +181,8 @@ class NEUDefectDataset(Dataset):
         tree = ET.parse(xml_path)
         root = tree.getroot()
 
-        class_names: list[str]       = []
-        boxes:       list[list[int]] = []
+        class_name: Optional[str]    = None
+        boxes: list[list[int]]       = []
 
         for obj in root.findall("object"):
             name_tag = obj.find("name")
@@ -207,7 +192,10 @@ class NEUDefectDataset(Dataset):
             if name_tag is None or bndbox is None:
                 continue
 
-            class_names.append(name_tag.text.strip())
+            # Take class name from the first valid object
+            if class_name is None:
+                class_name = name_tag.text.strip()
+
             boxes.append([
                 int(bndbox.find("xmin").text),
                 int(bndbox.find("ymin").text),
@@ -215,13 +203,47 @@ class NEUDefectDataset(Dataset):
                 int(bndbox.find("ymax").text),
             ])
 
-        if not boxes:
+        if class_name is None or not boxes:
             raise ValueError(
                 f"No valid objects found in {xml_path}. "
                 "Check annotation file integrity."
             )
 
-        return class_names, boxes
+        return class_name, boxes
+
+    # ── Public box access for Grad-CAM ─────────────────────────────────────
+
+    def get_boxes(self, image_path: str) -> torch.Tensor:
+        """
+        Load bounding boxes for a single image at visualisation time.
+
+        Called by the Grad-CAM pipeline to overlay ground truth defect
+        regions on top of activation heatmaps. Not used during training.
+
+        Boxes are rescaled from original 200×200 image space to the
+        224×224 input space used by the model.
+
+        Args:
+            image_path: path string as stored in batch["image_path"]
+
+        Returns:
+            FloatTensor [N, 4] — (xmin, ymin, xmax, ymax) in 224×224 space
+
+        Example:
+            boxes = dataset.get_boxes(batch["image_path"][0])
+        """
+        scale = 224 / 200   # original → model input space
+
+        _, boxes = self._parse_annotation(Path(image_path))
+
+        scaled = [
+            [
+                int(x * scale) for x in box
+            ]
+            for box in boxes
+        ]
+
+        return torch.tensor(scaled, dtype=torch.float32)
 
     # ── Dataset interface ──────────────────────────────────────────────────
 
@@ -230,21 +252,14 @@ class NEUDefectDataset(Dataset):
 
     def __getitem__(self, idx: int) -> dict:
         """
-        Load and return a single sample.
+        Load and return a single training sample.
 
         Returns:
             {
-                "image":       FloatTensor [3, 224, 224],
-                "label":       int         — class index of first object
-                "boxes":       FloatTensor [N, 4]  (xmin, ymin, xmax, ymax)
-                "image_path":  str         — useful for Grad-CAM and debugging
+                "image":      FloatTensor [3, 224, 224],
+                "label":      int — class index,
+                "image_path": str — used to retrieve boxes for Grad-CAM,
             }
-
-        Note on "label":
-            NEU-DET images contain one defect class per image — all objects
-            in a single image share the same class. Label is taken from the
-            first object. If your dataset ever contains mixed-class images
-            this assumption will need revisiting.
         """
         image_path = self.image_paths[idx]
 
@@ -253,15 +268,12 @@ class NEUDefectDataset(Dataset):
         if self.transform:
             image = self.transform(image)
 
-        class_names, boxes = self._parse_annotation(image_path)
-
-        # NEU-DET guarantee: all objects in one image share the same class
-        label = self.class_to_idx[class_names[0]]
+        class_name, _ = self._parse_annotation(image_path)
+        label         = self.class_to_idx[class_name]
 
         return {
             "image":      image,
             "label":      label,
-            "boxes":      torch.tensor(boxes, dtype=torch.float32),
             "image_path": str(image_path),
         }
 
@@ -305,7 +317,7 @@ def build_dataloaders(
         (train_loader, val_loader, test_loader)
 
     Example:
-        from src.data.transforms import get_train_transforms, get_val_transforms
+        from src.data_operations.transforms import get_train_transforms, get_val_transforms
 
         train_loader, val_loader, test_loader = build_dataloaders(
             root            = Path("data/splits"),
@@ -318,6 +330,7 @@ def build_dataloaders(
     val_ds   = NEUDefectDataset(root, split="val",   transform=val_transform)
     test_ds  = NEUDefectDataset(root, split="test",  transform=val_transform)
 
+    # Guard against split integrity issues — all splits must share the same classes
     assert train_ds.class_to_idx == val_ds.class_to_idx == test_ds.class_to_idx, (
         "Class mapping mismatch across splits. "
         "Ensure all splits contain at least one image from every defect class."
@@ -329,7 +342,6 @@ def build_dataloaders(
         shuffle     = True,
         num_workers = num_workers,
         pin_memory  = pin_memory,
-        collate_fn  = collate_fn,
     )
     val_loader = DataLoader(
         val_ds,
@@ -337,7 +349,6 @@ def build_dataloaders(
         shuffle     = False,
         num_workers = num_workers,
         pin_memory  = pin_memory,
-        collate_fn  = collate_fn,
     )
     test_loader = DataLoader(
         test_ds,
@@ -345,7 +356,6 @@ def build_dataloaders(
         shuffle     = False,
         num_workers = num_workers,
         pin_memory  = pin_memory,
-        collate_fn  = collate_fn,
     )
 
     return train_loader, val_loader, test_loader
