@@ -41,6 +41,41 @@ from torch.utils.data import DataLoader, Dataset
 # ── Types ──────────────────────────────────────────────────────────────────
 SplitName = Literal["train", "val", "test"]
 
+# ══════════════════════════════════════════════════════════════════════════
+# Collate
+# ══════════════════════════════════════════════════════════════════════════
+
+def collate_fn(batch: list[dict]) -> dict:
+    """
+    Custom collate function for NEU-DET detection batches.
+
+    Why this is needed:
+        PyTorch's default collate stacks all sample values into tensors.
+        This works for images [3, 224, 224] and labels (int), but fails
+        for bounding boxes because different images contain different numbers
+        of defect instances — shapes [1, 4], [3, 4], [2, 4] cannot be stacked.
+
+    Solution:
+        Stack images and labels normally.
+        Keep boxes as a list of tensors — one per image, no stacking.
+
+    Args:
+        batch: list of sample dicts from NEUDefectDataset.__getitem__
+
+    Returns:
+        {
+            "image":      FloatTensor [batch_size, 3, 224, 224],
+            "label":      LongTensor  [batch_size],
+            "boxes":      list of FloatTensor, each [N_i, 4],
+            "image_path": list of str,
+        }
+    """
+    return {
+        "image":      torch.stack([s["image"] for s in batch]),
+        "label":      torch.tensor([s["label"] for s in batch], dtype=torch.long),
+        "boxes":      [s["boxes"] for s in batch],
+        "image_path": [s["image_path"] for s in batch],
+    }
 
 # ══════════════════════════════════════════════════════════════════════════
 # Dataset
@@ -283,7 +318,6 @@ def build_dataloaders(
     val_ds   = NEUDefectDataset(root, split="val",   transform=val_transform)
     test_ds  = NEUDefectDataset(root, split="test",  transform=val_transform)
 
-    # Guard against split integrity issues — all splits must share the same classes
     assert train_ds.class_to_idx == val_ds.class_to_idx == test_ds.class_to_idx, (
         "Class mapping mismatch across splits. "
         "Ensure all splits contain at least one image from every defect class."
@@ -292,9 +326,10 @@ def build_dataloaders(
     train_loader = DataLoader(
         train_ds,
         batch_size  = batch_size,
-        shuffle     = True,       # shuffle training data each epoch
+        shuffle     = True,
         num_workers = num_workers,
         pin_memory  = pin_memory,
+        collate_fn  = collate_fn,
     )
     val_loader = DataLoader(
         val_ds,
@@ -302,6 +337,7 @@ def build_dataloaders(
         shuffle     = False,
         num_workers = num_workers,
         pin_memory  = pin_memory,
+        collate_fn  = collate_fn,
     )
     test_loader = DataLoader(
         test_ds,
@@ -309,6 +345,7 @@ def build_dataloaders(
         shuffle     = False,
         num_workers = num_workers,
         pin_memory  = pin_memory,
+        collate_fn  = collate_fn,
     )
 
     return train_loader, val_loader, test_loader

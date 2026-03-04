@@ -15,7 +15,7 @@ base_dir = project_root / "data" / "NEU-DET"
 images_dir = base_dir / "IMAGES"
 annotations_dir = base_dir / "ANNOTATIONS"
 
-output_dir = project_root / "data" / "split"
+output_dir = project_root / "data" / "splits"
 
 # Create class → list of files mapping
 class_files = defaultdict(list)
@@ -64,7 +64,7 @@ print("Dataset split completed.")
 
 print("\n===== DATASET SPLIT VERIFICATION =====\n")
 
-split_dir = project_root / "data" / "split"
+split_dir = project_root / "data" / "splits"
 total_images = 0
 split_counts = {}
 

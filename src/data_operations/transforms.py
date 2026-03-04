@@ -9,7 +9,6 @@ Augmentation choices for NEU-DET specifically:
     colour variation adds no meaningful signal
   - Heavy random crops: intentionally OMITTED — defect regions can be small,
     aggressive cropping risks removing the defect entirely
-─────────────────────────────────────────────────────────────────────────────
 """
 
 from torchvision import transforms
