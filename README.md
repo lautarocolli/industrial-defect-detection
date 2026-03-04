@@ -126,7 +126,7 @@ This project includes a script that automatically splits both **images and annot
 The script is located at:
 
 ```
-src/split_dataset.py
+src/data-operations/split_dataset.py
 ```
 
 ### ▶️ Run the split script
