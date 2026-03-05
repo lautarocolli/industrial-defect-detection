@@ -5,8 +5,9 @@ from collections import Counter
 from pathlib import Path
 from sklearn.model_selection import train_test_split
 from collections import defaultdict
+from src.utils import set_seed
 
-random.seed(42) # for reproducibility
+set_seed(42) # for reproducibility
 
 # Paths
 project_root = Path(__file__).resolve().parent.parent
