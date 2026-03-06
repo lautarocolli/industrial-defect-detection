@@ -1,3 +1,20 @@
+"""
+split_dataset.py
+─────────────────────────────────────────────────────────────────────────────
+Generate train, test and val splits.
+
+Destination:
+    root/data/splits
+
+You should end up with:
+    root/data/splits/<train or test or val>/<IMAGES and ANNOTATIONS>/
+
+Usage:
+    In your console:
+    python run split_dataset.py
+─────────────────────────────────────────────────────────────────────────────
+"""
+
 import shutil
 import random
 

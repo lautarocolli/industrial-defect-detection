@@ -155,8 +155,6 @@ class NEUDefectDataset(Dataset):
         """
         Parse a Pascal VOC XML file and return class name + bounding boxes.
 
-        Both are extracted in a single pass to avoid reading the file twice.
-
         Returns:
             class_name: defect class of this image (first object's name)
             boxes:      list of [xmin, ymin, xmax, ymax] per defect instance
