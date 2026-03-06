@@ -3,15 +3,12 @@ dataset.py
 ─────────────────────────────────────────────────────────────────────────────
 PyTorch Dataset for the NEU Surface Defect Database.
 
-Task: Classification — predict defect class from image.
-
 Directory structure expected:
     data/splits/{split}/IMAGES/      ← .jpg images
     data/splits/{split}/ANNOTATIONS/ ← .xml Pascal VOC annotations
 
 Label source:
     Class label is read from the <object><name> tag in the XML file.
-    Filename is never parsed.
 
 Each training batch contains:
     image       FloatTensor  [3, 224, 224]
@@ -97,7 +94,7 @@ class NEUDefectDataset(Dataset):
                 "Check your dataset split path."
             )
 
-        # Class mapping built entirely from XML — single source of truth
+        # Class mapping built from XML
         self.classes: list[str] = self._discover_classes()
         self.class_to_idx: dict[str, int] = {
             cls: idx for idx, cls in enumerate(self.classes)
@@ -274,19 +271,6 @@ class NEUDefectDataset(Dataset):
             "label":      label,
             "image_path": str(image_path),
         }
-
-    # ── Repr ───────────────────────────────────────────────────────────────
-
-    def __repr__(self) -> str:
-        return (
-            f"NEUDefectDataset("
-            f"split={self.split!r}, "
-            f"n_samples={len(self)}, "
-            f"n_classes={len(self.classes)}, "
-            f"classes={self.classes}"
-            f")"
-        )
-
 
 # ══════════════════════════════════════════════════════════════════════════
 # DataLoader factory
