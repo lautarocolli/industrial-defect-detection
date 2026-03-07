@@ -59,7 +59,7 @@ def train(model, train_loader, val_loader, num_epochs):
 
             running_loss += loss
 
-            _, predicted = torch.max(outputs.data, 1) # what are the outputs of this function?
+            _, predicted = torch.max(outputs.data, 1)
 
-            total += labels.size(0)     # why can I calculate totals like this?
-            correct += (predicted == labels).sum().item() # why do I need the .item()?
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
