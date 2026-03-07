@@ -62,7 +62,6 @@ class ResNet50Classifier(nn.Module):
         super().__init__()
 
         # Load pretrained ResNet50
-        # ResNet50_Weights.DEFAULT always fetches the best available weights
         self.backbone = models.resnet50(weights=ResNet50_Weights.DEFAULT)
 
         # Replace the final fully connected layer
