@@ -4,10 +4,8 @@ gradcam.py
 
 ─────────────────────────────────────────────────────────────────────────────
 """
-
 import torch
 import torch.nn.functional as F
-import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from PIL import Image
@@ -44,3 +42,34 @@ class GradCAM():
         heatmap = F.interpolate(heatmap,(224,224), mode="bilinear", align_corners=False)
         heatmap = heatmap.squeeze() 
         return heatmap.cpu().numpy()
+    
+    def visualize(self, sample, classes):
+        image_path = sample['image_path']
+        image = Image.open(image_path).convert("L")
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+        heatmap = self.generate(sample["image"])
+        boxes = sample.dataset.get_boxes()
+        ax1.imshow(image, cmap="gray")
+        ax2.imshow(image, cmap="gray")
+        ax2.imshow(heatmap, alpha=0.5, cmap="jet")
+        
+        rect = patches.Rectangle(
+            (xmin, ymin),           # bottom left corner
+            xmax - xmin,            # width
+            ymax - ymin,            # height
+            linewidth=2,
+            edgecolor="red",
+            facecolor="none"        # transparent fill
+        )
+        ax1.add_patch(rect)
+        ax1.axis("off")
+        ax2.axis("off")
+        ax1.set_title("Original + Ground Truth")
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model.to(device)
+        with torch.no_grad():
+            x      = sample["image"].unsqueeze(0).to(device)
+            output = self.model(x)
+        pred_idx       = output.argmax().item()
+        pred_class     = classes[pred_idx]
+        ax2.set_title(f"Grad-CAM: {pred_class}")
