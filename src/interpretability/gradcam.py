@@ -36,5 +36,11 @@ class GradCAM():
         output[0, class_idx].backward()
         activations = self.activations.detach()
         gradients   = self.gradients.detach()
-        weights = gradients.mean(dim=[2, 3])
+        weights = gradients.mean(dim=[2, 3]).squeeze(0)
         weighted_sum = torch.einsum("bcd,b -> cd",activations, weights)
+        heatmap = F.relu(weighted_sum)
+        heatmap = heatmap / (heatmap.max() + 1e-8)
+        heatmap = heatmap.unsqueeze(0).unsqueeze(0)   # adds batch and channel dims
+        heatmap = F.interpolate(heatmap,(224,224), mode="bilinear", align_corners=False)
+        heatmap = heatmap.squeeze() 
+        return heatmap.cpu().numpy()
