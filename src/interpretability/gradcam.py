@@ -104,8 +104,9 @@ class GradCAM():
 
         # Detach from computation graph — we're done with backprop
         # .detach() prevents errors if further operations are performed
-        activations = self.activations.detach()  # [1, 2048, 7, 7]
-        gradients   = self.gradients.detach()    # [1, 2048, 7, 7]
+        activations  = self.activations.detach().squeeze(0)   # [1, 2048, 7, 7] → [2048, 7, 7]
+        gradients    = self.gradients.detach()                 # [1, 2048, 7, 7]
+        weights      = gradients.mean(dim=[2, 3]).squeeze(0)   # [2048]
 
         # Compute channel importance weights
         weights = gradients.mean(dim=[2, 3]).squeeze(0)   # [2048]
@@ -114,7 +115,7 @@ class GradCAM():
         # "bcd,b -> cd" means: for each spatial position [7,7],
         # multiply each channel b by its weight b, then sum across channels
         # Result: [7, 7] — single spatial heatmap
-        weighted_sum = torch.einsum("abcd,ab -> cd", activations, weights)
+        weighted_sum = torch.einsum("bcd,b -> cd", activations, weights)
 
         # ReLU — keep only positive activations
         heatmap = F.relu(weighted_sum)
@@ -169,7 +170,7 @@ class GradCAM():
         # Open original untransformed image for display
         # The tensor version is normalised and looks wrong to human eyes
         image_path = sample["image_path"]
-        image      = Image.open(image_path).convert("L")
+        image = Image.open(image_path).convert("L").resize((224, 224))
 
         # Two subplots side by side
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
