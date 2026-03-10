@@ -114,7 +114,7 @@ class GradCAM():
         # "bcd,b -> cd" means: for each spatial position [7,7],
         # multiply each channel b by its weight b, then sum across channels
         # Result: [7, 7] — single spatial heatmap
-        weighted_sum = torch.einsum("bcd,b -> cd", activations, weights)
+        weighted_sum = torch.einsum("abcd,ab -> cd", activations, weights)
 
         # ReLU — keep only positive activations
         heatmap = F.relu(weighted_sum)
