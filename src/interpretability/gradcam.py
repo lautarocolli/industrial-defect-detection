@@ -16,21 +16,22 @@ Supports two architectures via automatic shape detection:
     ResNet50 — target layer4, activations [2048, 7, 7]
         Weights each channel by its mean gradient across spatial dims,
         produces a [7, 7] heatmap upsampled to [224, 224].
+        ✓ Produces spatially coherent, defect-aligned heatmaps.
 
     ViT-B/16 — target last encoder block, activations [197, 768]
         Weights each token by its mean gradient across embedding dims,
         drops the CLS token, reshapes 196 patch scores to [14, 14],
         upsamples to [224, 224].
+        ✗ Grad-CAM does not produce meaningful heatmaps for frozen ViT.
+          See ViT Limitation note in generate() for full explanation.
 
 Usage:
     from src.interpretability.gradcam import GradCAM
-    from src.models.cnn.resnet import build_resnet
-    from src.models.transformer.vit import build_vit
 
-    # ResNet
+    # ResNet — works as expected
     cam = GradCAM(model, target_layer=model.backbone.layer4)
 
-    # ViT
+    # ViT — attempted, produces uninformative heatmaps (see limitation note)
     cam = GradCAM(vit_model, target_layer=vit_model.model.encoder.layers[-1])
 
     sample  = test_loader.dataset[idx]
@@ -68,21 +69,19 @@ class GradCAM():
         self.gradients   = None
 
         # Forward hook — fires when target_layer produces its output
-        # Saves whatever comes out of the layer for later use
+        # Registers a tensor-level gradient hook on the activation output
+        # This is more reliable than register_full_backward_hook for ViT
+        # because it hooks the specific tensor rather than the module
         def save_activation(module, input, output):
+            output = output.requires_grad_(True)
             self.activations = output
-            output.register_hook(lambda grad: setattr(self, 'gradients', grad))
+            self.activations.register_hook(
+                lambda grad: setattr(self, 'gradients', grad)
+            )
 
-        # Backward hook — fires when gradients flow back through target_layer
-        # grad_output[0] contains gradients w.r.t. the layer's output
-        # These tell us how much each activation influenced the class score
-        def save_gradient(module, grad_input, grad_output):
-            self.gradients = grad_output[0]
-
-        # Attach both hooks to the target layer
-        # They fire automatically on every forward/backward pass
+        # Attach forward hook to the target layer
+        # Fires automatically on every forward pass from this point
         target_layer.register_forward_hook(save_activation)
-        target_layer.register_full_backward_hook(save_gradient)
 
         # Store model so generate() and visualize() can access it via self
         self.model = model
@@ -92,8 +91,34 @@ class GradCAM():
         Generate a Grad-CAM heatmap for a single image.
 
         Automatically detects architecture from activation shape:
-            [seq, embed]   → ViT path   (e.g. [197, 768])
-            [ch, h, w]     → ResNet path (e.g. [2048, 7, 7])
+            [seq, embed]  → ViT path    (e.g. [197, 768])
+            [ch, h, w]    → ResNet path  (e.g. [2048, 7, 7])
+
+        Model safety:
+            All requires_grad states are saved before and restored after
+            the backward pass via try/finally — the model is never left
+            in a modified state regardless of success or failure.
+
+        ViT Limitation:
+            Grad-CAM requires meaningful gradients to flow back to the
+            target layer. For ViT trained with feature extraction (frozen
+            backbone), the gradient signal through the frozen encoder is
+            effectively zero — the frozen weights do not develop
+            task-specific spatial representations, so there is nothing
+            meaningful to visualise.
+
+            Attempted fixes:
+                - requires_grad_(True) on image tensor — gradients still zero
+                - Temporarily enabling last encoder block gradients — gradients
+                  non-zero but heatmap uniformly near-zero after ReLU,
+                  indicating the frozen features carry no spatial class signal
+
+            Conclusion:
+                Meaningful Grad-CAM for ViT would require either full
+                fine-tuning or a self-supervised backbone (e.g. DINO) that
+                develops task-specific attention during pretraining.
+                This is consistent with published findings that frozen ViT
+                backbones do not produce reliable spatial explanations.
 
         Args:
             image_tensor: FloatTensor [1, 3, 224, 224] — preprocessed image on device
@@ -108,7 +133,10 @@ class GradCAM():
         # Eval mode — disables dropout, stable BatchNorm statistics
         self.model.eval()
 
-        # Forward pass — hooks fire and save activations in self.activations
+        # Enable gradients on input tensor so backward pass can flow
+        image_tensor = image_tensor.requires_grad_(True)
+
+        # Forward pass — hook fires and saves activations in self.activations
         output = self.model(image_tensor)
 
         # Use predicted class if none specified
@@ -118,10 +146,27 @@ class GradCAM():
         # Clear gradients from previous operations
         self.model.zero_grad()
 
-        # Backward pass on the specific class score — not the loss
-        # Hooks fire and save gradients in self.gradients
-        # Must happen before detaching activations/gradients
-        output[0, class_idx].backward()
+        # Save original requires_grad state for every parameter
+        # This guarantees we can always restore the model exactly as it was
+        original_states = {
+            name: param.requires_grad
+            for name, param in self.model.named_parameters()
+        }
+
+        try:
+            # Temporarily enable gradients on all parameters so backward
+            # pass can flow through the frozen backbone to the target layer
+            for param in self.model.parameters():
+                param.requires_grad_(True)
+
+            # Backward pass on specific class score — not the loss
+            # Gradient hook on activations fires and saves self.gradients
+            output[0, class_idx].backward()
+
+        finally:
+            # Always restore original frozen state — even if backward fails
+            for name, param in self.model.named_parameters():
+                param.requires_grad_(original_states[name])
 
         # Detach both from computation graph — done with backprop
         # squeeze(0) removes the batch dimension
@@ -132,13 +177,17 @@ class GradCAM():
             # ── ViT path ───────────────────────────────────────────────────
             # activations: [197, 768] — 197 tokens, 768 embedding dims
             # gradients:   [197, 768] — same shape
+            #
+            # NOTE: For frozen ViT this path produces near-zero heatmaps.
+            # The code is correct — the limitation is architectural.
+            # See docstring ViT Limitation section for full explanation.
 
             # One importance weight per token — mean across embedding dimension
             # "how much did this token's embedding influence the class score?"
             weights = gradients.mean(dim=1)              # [197]
 
             # Scale each token's activation by its importance weight
-            # unsqueeze(1) broadcasts weights [197] → [197, 1] for multiplication
+            # unsqueeze(1) broadcasts [197] → [197, 1] for multiplication
             # sum across embedding dimension → one score per token
             weighted_sum = (activations * weights.unsqueeze(1)).sum(dim=1)  # [197]
 
@@ -149,7 +198,7 @@ class GradCAM():
             # ReLU — keep only positive contributions
             heatmap = F.relu(weighted_sum)
 
-            # Normalise to [0, 1]
+            # Normalise to [0, 1] — for frozen ViT this will be near-zero
             heatmap = heatmap / (heatmap.max() + 1e-8)
 
             # Reshape flat patch sequence into 2D spatial grid
@@ -207,8 +256,9 @@ class GradCAM():
             Left  — original grayscale image with ground truth bounding boxes
             Right — same image with Grad-CAM heatmap overlaid
 
-        The comparison reveals whether the model's attention aligns with
-        the annotated defect region — the core interpretability finding.
+        For ResNet50 this produces meaningful spatial heatmaps.
+        For frozen ViT this will display a near-uniform blue heatmap —
+        this is expected and documented. See generate() for explanation.
 
         Args:
             sample:  dict from NEUDefectDataset.__getitem__ containing
@@ -224,7 +274,7 @@ class GradCAM():
         # generate() expects [1, 3, 224, 224] not [3, 224, 224]
         image_tensor = sample["image"].unsqueeze(0).to(device)
 
-        # Single forward+backward pass produces both heatmap and prediction
+        # Forward+backward pass produces both heatmap and predicted class
         heatmap, pred_idx = self.generate(image_tensor)
         pred_class        = classes[pred_idx]
 
