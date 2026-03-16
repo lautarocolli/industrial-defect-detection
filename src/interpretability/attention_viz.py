@@ -63,12 +63,15 @@ class AttentionRollout():
         # output is a tuple: (context, attention_weights)
         # output[1] contains attention weights [1, num_heads, 197, 197]
         def save_attention(module, input, output):
-            self.attention_maps.append(output[1].detach())
+            with torch.no_grad():
+                x = module.ln_1(input[0])
+                _, attn = module.self_attention(x, x, x, need_weights=True)
+                self.attention_maps.append(attn.detach())
 
         # Register hook on every transformer block's self_attention module
         # 12 blocks → 12 hooks → 12 attention matrices per forward pass
         for block in model.model.encoder.layers:
-            handle = block.self_attention.register_forward_hook(save_attention)
+            handle = block.register_forward_hook(save_attention)
             self._hooks.append(handle)
 
         # Store model so generate() and visualize() can access it via self
