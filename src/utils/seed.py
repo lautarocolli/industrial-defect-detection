@@ -3,14 +3,6 @@ seed.py
 ─────────────────────────────────────────────────────────────────────────────
 Deterministic seeding for reproducible experiments.
 
-Call set_seed() once at the top of each notebook.
-
-Sources of randomness fixed:
-    - Python's built-in random module
-    - NumPy
-    - PyTorch CPU operations
-    - PyTorch CUDA operations (GPU)
-
 Usage:
     from src.utils.seed import set_seed
 
