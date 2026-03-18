@@ -25,6 +25,10 @@ Supports two architectures via automatic shape detection:
         ✗ Grad-CAM does not produce meaningful heatmaps for frozen ViT.
           See ViT Limitation note in generate() for full explanation.
 
+Architecture detection:
+    hasattr(model, 'backbone') — True for ResNet, False for ViT
+    Used to apply ViT-specific gradient handling without affecting ResNet.
+
 Usage:
     from src.interpretability.gradcam import GradCAM
 
@@ -57,6 +61,17 @@ class GradCAM():
     architecture-agnostic. Shape detection in generate() determines which
     computational path to follow.
 
+    Architecture is detected via hasattr(model, 'backbone'):
+        ResNet50 has self.backbone  → True
+        ViT-B/16 has self.model     → False
+
+    This distinction controls:
+        - Whether requires_grad_(True) is set on the image tensor
+        - Whether parameters are temporarily unfrozen for the backward pass
+
+    ResNet is never modified — its gradient flow works naturally through
+    the unfrozen layer3, layer4, and fc.
+
     Args:
         model:        trained ResNet50Classifier or ViT_B_16_Classifier
         target_layer: nn.Module to hook — layer4 for ResNet, last encoder
@@ -70,8 +85,7 @@ class GradCAM():
 
         # Forward hook — fires when target_layer produces its output
         # Registers a tensor-level gradient hook on the activation output
-        # This is more reliable than register_full_backward_hook for ViT
-        # because it hooks the specific tensor rather than the module
+        # More reliable than register_full_backward_hook across architectures
         def save_activation(module, input, output):
             output = output.requires_grad_(True)
             self.activations = output
@@ -94,10 +108,15 @@ class GradCAM():
             [seq, embed]  → ViT path    (e.g. [197, 768])
             [ch, h, w]    → ResNet path  (e.g. [2048, 7, 7])
 
-        Model safety:
-            All requires_grad states are saved before and restored after
-            the backward pass via try/finally — the model is never left
-            in a modified state regardless of success or failure.
+        Architecture-aware gradient handling:
+            ResNet — gradients flow naturally through unfrozen layers.
+                     Image tensor is NOT modified with requires_grad_(True)
+                     as this can interfere with ResNet's gradient graph.
+
+            ViT    — entire backbone is frozen so gradients cannot flow
+                     naturally. Image tensor gets requires_grad_(True) and
+                     all parameters are temporarily unfrozen for backward.
+                     Original frozen state is always restored via try/finally.
 
         ViT Limitation:
             Grad-CAM requires meaningful gradients to flow back to the
@@ -109,16 +128,16 @@ class GradCAM():
 
             Attempted fixes:
                 - requires_grad_(True) on image tensor — gradients still zero
-                - Temporarily enabling last encoder block gradients — gradients
-                  non-zero but heatmap uniformly near-zero after ReLU,
-                  indicating the frozen features carry no spatial class signal
+                - Temporarily enabling all parameters for backward pass —
+                  gradients non-zero but heatmap uniformly near-zero after
+                  ReLU, indicating frozen features carry no spatial class signal
 
             Conclusion:
                 Meaningful Grad-CAM for ViT would require either full
-                fine-tuning or a self-supervised backbone (e.g. DINO) that
+                fine-tuning or a self-supervised backbone such as DINO that
                 develops task-specific attention during pretraining.
-                This is consistent with published findings that frozen ViT
-                backbones do not produce reliable spatial explanations.
+                Consistent with published findings that frozen ViT backbones
+                do not produce reliable spatial explanations.
 
         Args:
             image_tensor: FloatTensor [1, 3, 224, 224] — preprocessed image on device
@@ -133,8 +152,13 @@ class GradCAM():
         # Eval mode — disables dropout, stable BatchNorm statistics
         self.model.eval()
 
-        # Enable gradients on input tensor so backward pass can flow
-        image_tensor = image_tensor.requires_grad_(True)
+        is_vit = not hasattr(self.model, 'backbone')
+
+        # ViT only — image tensor needs requires_grad_(True) because the
+        # frozen backbone blocks natural gradient flow
+        # ResNet — skip this, it can interfere with gradient graph
+        if is_vit:
+            image_tensor = image_tensor.requires_grad_(True)
 
         # Forward pass — hook fires and saves activations in self.activations
         output = self.model(image_tensor)
@@ -146,27 +170,31 @@ class GradCAM():
         # Clear gradients from previous operations
         self.model.zero_grad()
 
-        # Save original requires_grad state for every parameter
-        # This guarantees we can always restore the model exactly as it was
-        original_states = {
-            name: param.requires_grad
-            for name, param in self.model.named_parameters()
-        }
+        if is_vit:
+            # ViT — temporarily enable all parameters so gradients can flow
+            # back through the frozen backbone to the target layer
+            # try/finally guarantees model is always restored to frozen state
+            original_states = {
+                name: param.requires_grad
+                for name, param in self.model.named_parameters()
+            }
+            try:
+                for param in self.model.parameters():
+                    param.requires_grad_(True)
 
-        try:
-            # Temporarily enable gradients on all parameters so backward
-            # pass can flow through the frozen backbone to the target layer
-            for param in self.model.parameters():
-                param.requires_grad_(True)
+                # Backward pass on specific class score — hooks fire and
+                # save gradients in self.gradients
+                output[0, class_idx].backward()
 
-            # Backward pass on specific class score — not the loss
-            # Gradient hook on activations fires and saves self.gradients
+            finally:
+                # Always restore original frozen state — even if backward fails
+                # Ensures ViT is never left in a modified state
+                for name, param in self.model.named_parameters():
+                    param.requires_grad_(original_states[name])
+        else:
+            # ResNet — gradients flow naturally through unfrozen layer3,
+            # layer4, and fc — no parameter modification needed
             output[0, class_idx].backward()
-
-        finally:
-            # Always restore original frozen state — even if backward fails
-            for name, param in self.model.named_parameters():
-                param.requires_grad_(original_states[name])
 
         # Detach both from computation graph — done with backprop
         # squeeze(0) removes the batch dimension
@@ -191,7 +219,7 @@ class GradCAM():
             # sum across embedding dimension → one score per token
             weighted_sum = (activations * weights.unsqueeze(1)).sum(dim=1)  # [197]
 
-            # Drop the CLS token (index 0) — it's not a spatial patch
+            # Drop CLS token (index 0) — not a spatial patch
             # Keep only the 196 patch tokens
             weighted_sum = weighted_sum[1:]              # [197] → [196]
 
@@ -257,8 +285,8 @@ class GradCAM():
             Right — same image with Grad-CAM heatmap overlaid
 
         For ResNet50 this produces meaningful spatial heatmaps.
-        For frozen ViT this will display a near-uniform blue heatmap —
-        this is expected and documented. See generate() for explanation.
+        For frozen ViT this displays a near-uniform blue heatmap —
+        expected and documented. See generate() for full explanation.
 
         Args:
             sample:  dict from NEUDefectDataset.__getitem__ containing
