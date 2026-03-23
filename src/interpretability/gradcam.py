@@ -50,6 +50,7 @@ import torch
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import io
 from PIL import Image
 
 
@@ -345,3 +346,47 @@ class GradCAM():
 
         plt.tight_layout()
         plt.show()
+
+    def to_bytes(self, image_tensor, pil_image, classes) -> bytes:
+        """
+        Generate a Grad-CAM heatmap and return it as PNG bytes for API responses.
+
+        Returns a single plot — the input image with the Grad-CAM heatmap
+        overlaid — suitable for production inference where no ground truth
+        boxes are available.
+
+        Designed for FastAPI endpoints where plt.show() is not available.
+        Closes the matplotlib figure after saving to prevent memory leaks
+        in long-running server contexts.
+
+        Args:
+            image_tensor: FloatTensor [1, 3, 224, 224] — preprocessed image on device
+            pil_image:    PIL Image — original image for display, already resized to 224×224
+            classes:      list of class name strings from dataset.classes
+
+        Returns:
+            bytes — PNG image of the Grad-CAM visualisation, ready to pass
+                    to FastAPI's StreamingResponse
+        """
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model.to(device)
+
+        # Forward+backward pass produces both heatmap and predicted class
+        heatmap, pred_idx = self.generate(image_tensor)
+        pred_class        = classes[pred_idx]
+
+        # Single plot — image with heatmap overlay
+        # pil_image is passed in ready to use — no loading needed
+        fig, ax = plt.subplots(figsize=(6, 6))
+        ax.imshow(pil_image, cmap="gray")
+        ax.imshow(heatmap, alpha=0.5, cmap="jet")
+        ax.axis("off")
+        ax.set_title(f"Grad-CAM: {pred_class}")
+
+        # Save to bytes buffer and close figure
+        # plt.close() prevents memory accumulation across API requests
+        buffer = io.BytesIO()
+        plt.savefig(buffer, format="png", bbox_inches="tight")
+        plt.close(fig)
+        buffer.seek(0)
+        return buffer.read()

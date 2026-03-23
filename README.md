@@ -158,6 +158,7 @@ industrial-defect-detection/
 
 - `.venv/` is ignored  
 - `data/` is ignored  
+- `experiments/` is ignored  
 - Only code and configuration files are tracked in Git
 
 ## Model Weights
