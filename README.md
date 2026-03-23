@@ -163,4 +163,4 @@ industrial-defect-detection/
 ## Model Weights
 
 Pretrained model weights are available on Hugging Face Hub:
-[YOUR_USERNAME/neu-det-defect-detection](https://huggingface.co/YOUR_USERNAME/neu-det-defect-detection)
+[lautivuelos/neu-det-defect-detection](https://huggingface.co/lautivuelos/neu-det-defect-detection)
