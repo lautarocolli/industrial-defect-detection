@@ -159,3 +159,8 @@ industrial-defect-detection/
 - `.venv/` is ignored  
 - `data/` is ignored  
 - Only code and configuration files are tracked in Git
+
+## Model Weights
+
+Pretrained model weights are available on Hugging Face Hub:
+[YOUR_USERNAME/neu-det-defect-detection](https://huggingface.co/YOUR_USERNAME/neu-det-defect-detection)
