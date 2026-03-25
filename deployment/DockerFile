@@ -1,0 +1,22 @@
+# Use the official Python image as a base
+FROM python:3.11-slim
+
+# Set the working directory
+WORKDIR /app
+
+# Copy the pyproject.toml and install dependencies
+COPY pyproject.toml .
+RUN pip install poetry && poetry install --no-dev
+
+# Copy the application code
+COPY deployment/app ./deployment/app
+COPY src ./src
+
+# Expose the port the app runs on
+EXPOSE 8000
+
+# Run uv sync for deployment group
+RUN uv sync --group deploy
+
+# Command to run the application
+CMD ["uvicorn", "deployment.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
