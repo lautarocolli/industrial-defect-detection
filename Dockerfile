@@ -4,14 +4,13 @@ FROM python:3.11-slim
 # Set working directory
 WORKDIR /app
 
-# Set PYTHONPATH so src/ and deployment/ are importable
+# Set PYTHONPATH
 ENV PYTHONPATH=/app
 
 # Install uv
 RUN pip install uv
 
-# Copy dependency files first — Docker caches this layer
-# Only invalidated when pyproject.toml or uv.lock changes
+# Copy dependency files 
 COPY pyproject.toml uv.lock ./
 
 # Install base + deploy dependencies only — skip dev group
@@ -24,5 +23,5 @@ COPY deployment ./deployment
 # Expose the port
 EXPOSE 8000
 
-# Run the application — no --reload in production
+# Run the application
 CMD ["uv", "run", "uvicorn", "deployment.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
