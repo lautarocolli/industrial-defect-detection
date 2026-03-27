@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: neu-det-api
+  labels:
+    app: neu-det-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: neu-det-api
+  template:
+    metadata:
+      labels:
+        app: neu-det-api
+    spec:
+      containers:
+        - name: neu-det-api
+          image: neu-det-api:latest
+          # Never pull from registry
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8000
+          # Resource limits
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          # Readiness probe — pod only receives traffic when /health returns 200
+          # Kubernetes checks this before routing any requests to the pod
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30   # wait for model to load from Hub
+            periodSeconds: 10
+          # Liveness probe — Kubernetes restarts the pod if this fails
+          # Catches cases where the server is running but stuck
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 20
