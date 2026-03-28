@@ -137,7 +137,7 @@ rm neu-urface-defect-database.zip
 ### 6. Split the Dataset
 
 ```bash
-python src/data_operations/split_dataset.py
+python -m src.data_operations.split_dataset
 ```
 
 Splits into 70/15/15 with stratification — both images and annotations.
