@@ -90,7 +90,7 @@ This project uses the [NEU Surface Defect Database](https://www.kaggle.com/datas
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/lautivuelos/industrial-defect-detection.git
+git clone https://github.com/lautarocolli/industrial-defect-detection.git
 cd industrial-defect-detection
 ```
 
