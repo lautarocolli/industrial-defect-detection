@@ -90,7 +90,7 @@ This project uses the [NEU Surface Defect Database](https://www.kaggle.com/datas
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/lautivuelos/industrial-defect-detection.git
+git clone https://github.com/lautarocolli/industrial-defect-detection.git
 cd industrial-defect-detection
 ```
 
@@ -107,8 +107,12 @@ source .venv/bin/activate
 ### 3. Install Dependencies
 
 ```bash
-uv sync
-uv sync --group dev
+# Install all dependencies for local development
+uv sync --group dev --group deploy
+
+# Or install only what you need:
+uv sync --group dev      # notebooks only
+uv sync --group deploy   # API only
 ```
 
 ### 4. Register Jupyter Kernel
@@ -137,7 +141,7 @@ rm neu-urface-defect-database.zip
 ### 6. Split the Dataset
 
 ```bash
-python src/data_operations/split_dataset.py
+python -m src.data_operations.split_dataset
 ```
 
 Splits into 70/15/15 with stratification — both images and annotations.
@@ -174,7 +178,7 @@ kind load docker-image neu-det-api --name neu-det
 kubectl apply -f k8s/deployment.yaml
 kubectl apply -f k8s/service.yaml
 
-# Forward port
+# Forward port - wait a bit for this one (~30 s)
 kubectl port-forward service/neu-det-api 8000:8000
 ```
 
