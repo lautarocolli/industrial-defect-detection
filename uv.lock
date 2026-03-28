@@ -728,14 +728,19 @@ name = "industrial-defect-detection"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "fastapi" },
     { name = "huggingface-hub" },
+    { name = "pillow" },
+    { name = "torch" },
+    { name = "torchvision" },
+]
+
+[package.dev-dependencies]
+deploy = [
+    { name = "fastapi" },
     { name = "pydantic" },
     { name = "python-multipart" },
     { name = "uvicorn" },
 ]
-
-[package.dev-dependencies]
 dev = [
     { name = "ipykernel" },
     { name = "jupyter" },
@@ -745,21 +750,22 @@ dev = [
     { name = "scikit-learn" },
     { name = "tqdm" },
 ]
-training = [
-    { name = "torch" },
-    { name = "torchvision" },
-]
 
 [package.metadata]
 requires-dist = [
-    { name = "fastapi", specifier = ">=0.135.0" },
     { name = "huggingface-hub", specifier = ">=1.7.2" },
+    { name = "pillow", specifier = ">=11.0.0" },
+    { name = "torch", specifier = ">=2.10.0" },
+    { name = "torchvision", specifier = ">=0.25.0" },
+]
+
+[package.metadata.requires-dev]
+deploy = [
+    { name = "fastapi", specifier = ">=0.135.0" },
     { name = "pydantic", specifier = ">=2.12.0" },
     { name = "python-multipart", specifier = ">=0.0.22" },
     { name = "uvicorn", specifier = ">=0.41.0" },
 ]
-
-[package.metadata.requires-dev]
 dev = [
     { name = "ipykernel", specifier = ">=7.2.0" },
     { name = "jupyter", specifier = ">=1.1.1" },
@@ -768,10 +774,6 @@ dev = [
     { name = "pandas", specifier = ">=3.0.1" },
     { name = "scikit-learn", specifier = ">=1.8.0" },
     { name = "tqdm", specifier = ">=4.67.3" },
-]
-training = [
-    { name = "torch", specifier = ">=2.10.0" },
-    { name = "torchvision", specifier = ">=0.25.0" },
 ]
 
 [[package]]
