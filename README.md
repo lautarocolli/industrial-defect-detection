@@ -238,7 +238,7 @@ curl -X POST http://localhost:8000/predict/visual \
 
 ## ⚠️ Known limitations
 
-**No "no-defect" class.** The model always predicts one of 6 defect classes — it cannot identify clean parts. Production deployment would require either a 7th class with clean surface images or an anomaly detection component.
+**No "no-defect" class.** The model always predicts one of 6 defect classes — it cannot identify clean parts. Real production deployment would require either a 7th class with clean surface images or an anomaly detection component.
 
 **ViT interpretability requires further work.** Feature extraction ViT does not produce meaningful spatial explanations. Full fine-tuning or a DINO backbone would be needed for comparable interpretability to ResNet50. If you have the time and interest to add this, please send a PR!
 
