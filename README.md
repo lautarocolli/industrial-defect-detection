@@ -136,6 +136,7 @@ mkdir data && cd data
 kaggle datasets download -d rdsunday/neu-urface-defect-database
 unzip neu-urface-defect-database.zip
 rm neu-urface-defect-database.zip
+cd ..
 ```
 
 ### 6. Split the Dataset
